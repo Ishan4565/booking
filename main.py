@@ -4,8 +4,11 @@ from fastapi import FastAPI, HTTPException
 from psycopg2.extras import RealDictCursor
 from contextlib import asynccontextmanager
 
-DATABASE_URL = os.getenv("postgresql://booking_db_ymh9_user:K33DWn4uZQTHUmQQHkDVd9uNNHmzL557@dpg-d5vh8nqqcgvc739kdte0-a/booking_db_ymh9")
+# This line is the fix: It ensures the URL is actually there
+DATABASE_URL = os.environ.get("DATABASE_URL")
 
+if not DATABASE_URL:
+    print("❌ ERROR: DATABASE_URL environment variable is missing!")
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup: Setup database
@@ -61,3 +64,4 @@ def book_seat(seat_id: int, user_id: int):
     finally:
         cur.close()
         conn.close()
+
