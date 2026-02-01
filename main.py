@@ -35,7 +35,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 
 # 2. DEFINE THE ROUTES (The "Green and Blue" buttons)
-@app.get("/seats")
+@app.get("/seats", tags=["Booking System"], summary="View All Seats")
 def get_seats():
     conn = psycopg2.connect(DATABASE_URL)
     cur = conn.cursor(cursor_factory=RealDictCursor)
@@ -44,8 +44,7 @@ def get_seats():
     cur.close()
     conn.close()
     return seats
-
-@app.post("/book/{seat_id}")
+@app.post("/book/{seat_id}", tags=["Booking System"], summary="Book a Specific Seat")
 def book_seat(seat_id: int, user_id: int):
     conn = psycopg2.connect(DATABASE_URL)
     cur = conn.cursor()
@@ -64,4 +63,5 @@ def book_seat(seat_id: int, user_id: int):
     finally:
         cur.close()
         conn.close()
+
 
