@@ -32,7 +32,12 @@ async def lifespan(app: FastAPI):
     yield
 
 # 1. CREATE THE APP (Must be before the routes!)
-app = FastAPI(lifespan=lifespan)
+app = FastAPI(
+    title="Seat Booking System",
+    description="A clean interface for seat reservations",
+    docs_url="/docs",
+    openapi_url="/openapi.json"
+)
 
 # 2. DEFINE THE ROUTES (The "Green and Blue" buttons)
 @app.get("/seats", tags=["Booking System"], summary="Check Seat Availability")
@@ -63,6 +68,7 @@ def book_seat(seat_id: int, user_id: int):
     finally:
         cur.close()
         conn.close()
+
 
 
 
