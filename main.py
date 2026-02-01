@@ -71,11 +71,15 @@ def book_seat(seat_id: int, user_id: int):
 
 @app.post("/reset", tags=["Admin"])
 def reset_db():
-    """Resets all seats to available."""
+    """Wipes the table and resets IDs to start at 1."""
     conn = psycopg2.connect(DATABASE_URL)
     cur = conn.cursor()
-    cur.execute("UPDATE seats SET status = 'available', user_id = NULL;")
+    # This command clears the table and restarts the ID counter at 1
+    cur.execute("TRUNCATE TABLE seats RESTART IDENTITY;")
+    # Re-fill the 10 seats
+    seats = [(f'Seat-{i}',) for i in range(1, 11)]
+    cur.executemany("INSERT INTO seats (seat_number) VALUES (%s);", seats)
     conn.commit()
     cur.close()
     conn.close()
-    return {"message": "Database reset!"}
+    return {"message": "Database wiped and IDs reset to 1!"}
