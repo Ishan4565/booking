@@ -4,15 +4,14 @@ from fastapi import FastAPI, HTTPException
 from psycopg2.extras import RealDictCursor
 from contextlib import asynccontextmanager
 
-# 1. Database Connection Configuration
+# Database Connection
 DATABASE_URL = os.environ.get("DATABASE_URL")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Handles database setup when the app starts."""
+    # Startup: Create table and seed data
     conn = psycopg2.connect(DATABASE_URL)
     cur = conn.cursor()
-    # Create the table if it doesn't exist
     cur.execute("""
         CREATE TABLE IF NOT EXISTS seats (
             id SERIAL PRIMARY KEY,
@@ -21,29 +20,23 @@ async def lifespan(app: FastAPI):
             user_id INTEGER
         );
     """)
-    # Fill with 10 seats if empty
     cur.execute("SELECT count(*) FROM seats;")
     if cur.fetchone()[0] == 0:
-        seats = [(f'A{i}',) for i in range(1, 11)]
+        seats = [(f'Seat-{i}',) for i in range(1, 11)]
         cur.executemany("INSERT INTO seats (seat_number) VALUES (%s);", seats)
     conn.commit()
     cur.close()
     conn.close()
     yield
 
-# 2. Initialize FastAPI with a clean Title and Description
 app = FastAPI(
-    title="🏢 Pro Booking Engine",
-    description="Backend API with Pessimistic Locking logic. Use the 'Reset' endpoint to clear data.",
-    lifespan=lifespan,
-    version="1.0.0"
+    title="Seat Booking API",
+    lifespan=lifespan
 )
 
-# 3. Routes (Cleaned up with Tags and Summaries)
-
-@app.get("/seats", tags=["User Dashboard"], summary="View All Available Seats")
+@app.get("/seats", tags=["Dashboard"])
 def get_seats():
-    """Fetches the current status of every seat in the database."""
+    """Check availability of all seats."""
     conn = psycopg2.connect(DATABASE_URL)
     cur = conn.cursor(cursor_factory=RealDictCursor)
     cur.execute("SELECT * FROM seats ORDER BY id;")
@@ -52,12 +45,37 @@ def get_seats():
     conn.close()
     return seats
 
-@app.post("/book/{seat_id}", tags=["Booking Actions"], summary="Confirm a Reservation")
+@app.post("/book/{seat_id}", tags=["Booking"])
 def book_seat(seat_id: int, user_id: int):
-    """Books a seat using Pessimistic Locking to prevent double-booking."""
+    """Books a seat using Pessimistic Locking."""
     conn = psycopg2.connect(DATABASE_URL)
     cur = conn.cursor()
     try:
-        # The 'FOR UPDATE' lock prevents race conditions
+        # Lock the row to prevent race conditions
         cur.execute("SELECT status FROM seats WHERE id = %s FOR UPDATE;", (seat_id,))
         row = cur.fetchone()
+        if not row:
+            return {"message": "Error: Seat not found"}
+        if row[0] == 'available':
+            cur.execute("UPDATE seats SET status = 'booked', user_id = %s WHERE id = %s;", (user_id, seat_id))
+            conn.commit()
+            return {"message": "✅ Success! Seat booked."}
+        else:
+            return {"message": "❌ Already taken."}
+    except Exception as e:
+        conn.rollback()
+        return {"error": str(e)}
+    finally:
+        cur.close()
+        conn.close()
+
+@app.post("/reset", tags=["Admin"])
+def reset_db():
+    """Resets all seats to available."""
+    conn = psycopg2.connect(DATABASE_URL)
+    cur = conn.cursor()
+    cur.execute("UPDATE seats SET status = 'available', user_id = NULL;")
+    conn.commit()
+    cur.close()
+    conn.close()
+    return {"message": "Database reset!"}
