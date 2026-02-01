@@ -4,12 +4,11 @@ from fastapi import FastAPI, HTTPException
 from psycopg2.extras import RealDictCursor
 from contextlib import asynccontextmanager
 
-# Database Connection
 DATABASE_URL = os.environ.get("DATABASE_URL")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: Create table and seed data
+    # This runs every time the app starts up
     conn = psycopg2.connect(DATABASE_URL)
     cur = conn.cursor()
     cur.execute("""
@@ -22,21 +21,18 @@ async def lifespan(app: FastAPI):
     """)
     cur.execute("SELECT count(*) FROM seats;")
     if cur.fetchone()[0] == 0:
-        seats = [(f'Seat-{i}',) for i in range(1, 11)]
+        # We are creating 10 seats here
+        seats = [(f'A{i}',) for i in range(1, 11)]
         cur.executemany("INSERT INTO seats (seat_number) VALUES (%s);", seats)
     conn.commit()
     cur.close()
     conn.close()
     yield
 
-app = FastAPI(
-    title="Seat Booking API",
-    lifespan=lifespan
-)
+app = FastAPI(title="Booking Engine", lifespan=lifespan)
 
-@app.get("/seats", tags=["Dashboard"])
+@app.get("/seats", tags=["Dashboard"], summary="Show all 10 seats")
 def get_seats():
-    """Check availability of all seats."""
     conn = psycopg2.connect(DATABASE_URL)
     cur = conn.cursor(cursor_factory=RealDictCursor)
     cur.execute("SELECT * FROM seats ORDER BY id;")
@@ -45,23 +41,21 @@ def get_seats():
     conn.close()
     return seats
 
-@app.post("/book/{seat_id}", tags=["Booking"])
+@app.post("/book/{seat_id}", tags=["Booking"], summary="Book a seat")
 def book_seat(seat_id: int, user_id: int):
-    """Books a seat using Pessimistic Locking."""
     conn = psycopg2.connect(DATABASE_URL)
     cur = conn.cursor()
     try:
-        # Lock the row to prevent race conditions
+        # LOCKING logic starts here
         cur.execute("SELECT status FROM seats WHERE id = %s FOR UPDATE;", (seat_id,))
         row = cur.fetchone()
         if not row:
-            return {"message": "Error: Seat not found"}
+            return {"message": f"❌ Error: Seat ID {seat_id} doesn't exist. Check /seats for valid IDs."}
         if row[0] == 'available':
             cur.execute("UPDATE seats SET status = 'booked', user_id = %s WHERE id = %s;", (user_id, seat_id))
             conn.commit()
-            return {"message": "✅ Success! Seat booked."}
-        else:
-            return {"message": "❌ Already taken."}
+            return {"message": f"✅ Success! Seat {seat_id} is yours."}
+        return {"message": "❌ Too late! This seat is already taken."}
     except Exception as e:
         conn.rollback()
         return {"error": str(e)}
@@ -69,17 +63,15 @@ def book_seat(seat_id: int, user_id: int):
         cur.close()
         conn.close()
 
-@app.post("/reset", tags=["Admin"])
+@app.post("/reset", tags=["Admin"], summary="Wipe everything and start over")
 def reset_db():
-    """Wipes the table and resets IDs to start at 1."""
     conn = psycopg2.connect(DATABASE_URL)
     cur = conn.cursor()
-    # This command clears the table and restarts the ID counter at 1
+    # This clears the table and resets IDs to start at 1
     cur.execute("TRUNCATE TABLE seats RESTART IDENTITY;")
-    # Re-fill the 10 seats
-    seats = [(f'Seat-{i}',) for i in range(1, 11)]
+    seats = [(f'A{i}',) for i in range(1, 11)]
     cur.executemany("INSERT INTO seats (seat_number) VALUES (%s);", seats)
     conn.commit()
     cur.close()
     conn.close()
-    return {"message": "Database wiped and IDs reset to 1!"}
+    return {"message": "Database wiped. You now have 10 fresh seats (IDs 1-10)."}
