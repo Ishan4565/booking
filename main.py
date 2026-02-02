@@ -81,10 +81,11 @@ def book_seat(seat_id: int, user_id: int, review: str):
 def reset_db():
     conn = psycopg2.connect(DATABASE_URL)
     cur = conn.cursor()
-    cur.execute("TRUNCATE TABLE seats RESTART IDENTITY;")
+    cur.execute("DROP TABLE IF EXISTS seats CASCADE;")
     seats = [(f'A{i}',) for i in range(1, 11)]
     cur.executemany("INSERT INTO seats (seat_number) VALUES (%s);", seats)
     conn.commit()
     cur.close()
     conn.close()
     return {"message": "Database reset."}
+
