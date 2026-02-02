@@ -1,9 +1,13 @@
 import os
 import psycopg2
+import nltk
 from fastapi import FastAPI
 from psycopg2.extras import RealDictCursor
 from contextlib import asynccontextmanager
 from textblob import TextBlob
+
+# This is the "missing piece" that makes the calculation work
+nltk.download('punkt_tab')
 
 DATABASE_URL = os.environ.get("DATABASE_URL")
 
@@ -11,7 +15,7 @@ DATABASE_URL = os.environ.get("DATABASE_URL")
 async def lifespan(app: FastAPI):
     conn = psycopg2.connect(DATABASE_URL)
     cur = conn.cursor()
-    # The "Hammer": Deletes the old table so the new AI columns can be created
+    # Forces the database to create the reviewer columns
     cur.execute("DROP TABLE IF EXISTS seats CASCADE;")
     cur.execute("""
         CREATE TABLE seats (
@@ -30,7 +34,7 @@ async def lifespan(app: FastAPI):
     conn.close()
     yield
 
-app = FastAPI(title="AI Booking Engine")
+app = FastAPI(title="Reviewer Project")
 
 @app.get("/seats")
 def get_seats():
@@ -44,8 +48,10 @@ def get_seats():
 
 @app.post("/book/{seat_id}")
 def book_seat(seat_id: int, user_id: int, review: str):
-    analysis = TextBlob(review)
-    score = analysis.sentiment.polarity
+    # This is the actual AI calculation
+    blob = TextBlob(review)
+    # Polarity is the score between -1 and 1
+    score = blob.sentiment.polarity 
     
     conn = psycopg2.connect(DATABASE_URL)
     cur = conn.cursor()
@@ -56,7 +62,11 @@ def book_seat(seat_id: int, user_id: int, review: str):
             WHERE id = %s;
         """, (user_id, review, score, seat_id))
         conn.commit()
-        return {"status": "success", "ai_score": score}
+        return {
+            "status": "success", 
+            "review_recorded": review, 
+            "calculated_score": score
+        }
     except Exception as e:
         return {"error": str(e)}
     finally:
