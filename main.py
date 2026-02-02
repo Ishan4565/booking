@@ -3,11 +3,9 @@ import psycopg2
 from fastapi import FastAPI
 from psycopg2.extras import RealDictCursor
 from contextlib import asynccontextmanager
-from transformers import pipeline
+from textblob import TextBlob
 
 DATABASE_URL = os.environ.get("DATABASE_URL")
-
-classifier = pipeline("sentiment-analysis", model="distilbert-base-uncased-finetuned-sst-2-english")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -32,7 +30,7 @@ async def lifespan(app: FastAPI):
     conn.close()
     yield
 
-app = FastAPI(title="AI-Powered Booking Engine", lifespan=lifespan)
+app = FastAPI(title="Lightweight AI Booking Engine", lifespan=lifespan)
 
 @app.get("/seats", tags=["Dashboard"])
 def get_seats():
@@ -46,11 +44,10 @@ def get_seats():
 
 @app.post("/book/{seat_id}", tags=["Booking"])
 def book_seat(seat_id: int, user_id: int, review: str):
-    ai_result = classifier(review)[0]
-    sentiment_label = ai_result['label']
-    sentiment_conf = ai_result['score']
+    analysis = TextBlob(review)
+    score = analysis.sentiment.polarity
     
-    numeric_score = 1.0 if sentiment_label == "POSITIVE" else 0.0
+    label = "POSITIVE" if score > 0 else "NEGATIVE" if score < 0 else "NEUTRAL"
 
     conn = psycopg2.connect(DATABASE_URL)
     cur = conn.cursor()
@@ -66,11 +63,11 @@ def book_seat(seat_id: int, user_id: int, review: str):
                 UPDATE seats 
                 SET status = 'booked', user_id = %s, user_review = %s, sentiment_score = %s 
                 WHERE id = %s;
-            """, (user_id, review, numeric_score, seat_id))
+            """, (user_id, review, score, seat_id))
             conn.commit()
             return {
                 "message": f"Success! Seat {seat_id} booked.",
-                "ai_feedback": f"Sentiment detected: {sentiment_label} ({sentiment_conf:.2f})"
+                "ai_feedback": f"Sentiment detected: {label} (Score: {score:.2f})"
             }
         return {"message": "Seat already taken"}
     except Exception as e:
@@ -90,4 +87,4 @@ def reset_db():
     conn.commit()
     cur.close()
     conn.close()
-    return {"message": "Database reset with 10 fresh seats."}
+    return {"message": "Database reset."}
