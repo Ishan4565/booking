@@ -1,14 +1,16 @@
 import os
 import psycopg2
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 from psycopg2.extras import RealDictCursor
 from contextlib import asynccontextmanager
+from transformers import pipeline
 
 DATABASE_URL = os.environ.get("DATABASE_URL")
 
+classifier = pipeline("sentiment-analysis", model="distilbert-base-uncased-finetuned-sst-2-english")
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # This runs every time the app starts up
     conn = psycopg2.connect(DATABASE_URL)
     cur = conn.cursor()
     cur.execute("""
@@ -16,12 +18,13 @@ async def lifespan(app: FastAPI):
             id SERIAL PRIMARY KEY,
             seat_number VARCHAR(10) UNIQUE NOT NULL,
             status VARCHAR(20) DEFAULT 'available',
-            user_id INTEGER
+            user_id INTEGER,
+            user_review TEXT,
+            sentiment_score FLOAT
         );
     """)
     cur.execute("SELECT count(*) FROM seats;")
     if cur.fetchone()[0] == 0:
-        # We are creating 10 seats here
         seats = [(f'A{i}',) for i in range(1, 11)]
         cur.executemany("INSERT INTO seats (seat_number) VALUES (%s);", seats)
     conn.commit()
@@ -29,9 +32,9 @@ async def lifespan(app: FastAPI):
     conn.close()
     yield
 
-app = FastAPI(title="Booking Engine", lifespan=lifespan)
+app = FastAPI(title="AI-Powered Booking Engine", lifespan=lifespan)
 
-@app.get("/seats", tags=["Dashboard"], summary="Show all 10 seats")
+@app.get("/seats", tags=["Dashboard"])
 def get_seats():
     conn = psycopg2.connect(DATABASE_URL)
     cur = conn.cursor(cursor_factory=RealDictCursor)
@@ -41,21 +44,35 @@ def get_seats():
     conn.close()
     return seats
 
-@app.post("/book/{seat_id}", tags=["Booking"], summary="Book a seat")
-def book_seat(seat_id: int, user_id: int):
+@app.post("/book/{seat_id}", tags=["Booking"])
+def book_seat(seat_id: int, user_id: int, review: str):
+    ai_result = classifier(review)[0]
+    sentiment_label = ai_result['label']
+    sentiment_conf = ai_result['score']
+    
+    numeric_score = 1.0 if sentiment_label == "POSITIVE" else 0.0
+
     conn = psycopg2.connect(DATABASE_URL)
     cur = conn.cursor()
     try:
-        # LOCKING logic starts here
         cur.execute("SELECT status FROM seats WHERE id = %s FOR UPDATE;", (seat_id,))
         row = cur.fetchone()
+        
         if not row:
-            return {"message": f"❌ Error: Seat ID {seat_id} doesn't exist. Check /seats for valid IDs."}
+            return {"error": "Seat not found"}
+            
         if row[0] == 'available':
-            cur.execute("UPDATE seats SET status = 'booked', user_id = %s WHERE id = %s;", (user_id, seat_id))
+            cur.execute("""
+                UPDATE seats 
+                SET status = 'booked', user_id = %s, user_review = %s, sentiment_score = %s 
+                WHERE id = %s;
+            """, (user_id, review, numeric_score, seat_id))
             conn.commit()
-            return {"message": f"✅ Success! Seat {seat_id} is yours."}
-        return {"message": "❌ Too late! This seat is already taken."}
+            return {
+                "message": f"Success! Seat {seat_id} booked.",
+                "ai_feedback": f"Sentiment detected: {sentiment_label} ({sentiment_conf:.2f})"
+            }
+        return {"message": "Seat already taken"}
     except Exception as e:
         conn.rollback()
         return {"error": str(e)}
@@ -63,15 +80,14 @@ def book_seat(seat_id: int, user_id: int):
         cur.close()
         conn.close()
 
-@app.post("/reset", tags=["Admin"], summary="Wipe everything and start over")
+@app.post("/reset", tags=["Admin"])
 def reset_db():
     conn = psycopg2.connect(DATABASE_URL)
     cur = conn.cursor()
-    # This clears the table and resets IDs to start at 1
     cur.execute("TRUNCATE TABLE seats RESTART IDENTITY;")
     seats = [(f'A{i}',) for i in range(1, 11)]
     cur.executemany("INSERT INTO seats (seat_number) VALUES (%s);", seats)
     conn.commit()
     cur.close()
     conn.close()
-    return {"message": "Database wiped. You now have 10 fresh seats (IDs 1-10)."}
+    return {"message": "Database reset with 10 fresh seats."}
