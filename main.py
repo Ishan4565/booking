@@ -1,26 +1,23 @@
 import os
 import psycopg2
-import nltk
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse
 from psycopg2.extras import RealDictCursor
 from contextlib import asynccontextmanager
 from pydantic import BaseModel
-from textblob import TextBlob
+
+try:
+    from textblob import TextBlob
+    TEXTBLOB_AVAILABLE = True
+except:
+    TEXTBLOB_AVAILABLE = False
 
 DATABASE_URL = os.environ.get("DATABASE_URL")
 
 if not DATABASE_URL:
-    raise ValueError("DATABASE_URL environment variable is required")
+    raise ValueError("DATABASE_URL is required")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    try:
-        nltk.download('punkt', quiet=True)
-        nltk.download('brown', quiet=True)
-    except:
-        pass
-    
     conn = psycopg2.connect(DATABASE_URL)
     cur = conn.cursor()
     
@@ -48,9 +45,7 @@ async def lifespan(app: FastAPI):
     yield
 
 app = FastAPI(
-    title="AI-Powered Booking System",
-    description="Seat booking with sentiment analysis and race condition prevention",
-    version="1.0.0",
+    title="Booking System with AI",
     lifespan=lifespan
 )
 
@@ -58,80 +53,24 @@ class BookingRequest(BaseModel):
     user_id: int
     review: str
 
-@app.get("/", response_class=HTMLResponse, include_in_schema=False)
-def home():
-    html = """
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <title>AI Booking System</title>
-        <style>
-            body {
-                font-family: Arial, sans-serif;
-                max-width: 800px;
-                margin: 50px auto;
-                padding: 20px;
-                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                min-height: 100vh;
-            }
-            .container {
-                background: white;
-                border-radius: 15px;
-                padding: 30px;
-                box-shadow: 0 10px 40px rgba(0,0,0,0.3);
-            }
-            h1 {
-                color: #667eea;
-                text-align: center;
-            }
-            .feature {
-                background: #f8f9fa;
-                padding: 15px;
-                margin: 15px 0;
-                border-left: 4px solid #667eea;
-                border-radius: 5px;
-            }
-            .btn {
-                display: block;
-                background: #667eea;
-                color: white;
-                padding: 15px;
-                text-align: center;
-                text-decoration: none;
-                border-radius: 8px;
-                margin-top: 20px;
-                font-weight: bold;
-            }
-            .btn:hover {
-                background: #764ba2;
-            }
-        </style>
-    </head>
-    <body>
-        <div class="container">
-            <h1>🎫 AI-Powered Booking System</h1>
-            
-            <div class="feature">
-                <h3>✅ Race Condition Prevention</h3>
-                <p>Handles 500 simultaneous bookings - only first person gets the seat!</p>
-            </div>
-            
-            <div class="feature">
-                <h3>🤖 AI Sentiment Analysis</h3>
-                <p>Automatically analyzes if reviews are positive, negative, or neutral</p>
-            </div>
-            
-            <div class="feature">
-                <h3>📊 Real-time Scoring</h3>
-                <p>Uses TextBlob NLP to calculate sentiment scores (-1 to +1)</p>
-            </div>
-            
-            <a href="/docs" class="btn">📖 Try the API Now</a>
-        </div>
-    </body>
-    </html>
-    """
-    return HTMLResponse(content=html)
+def analyze_sentiment(text):
+    if not TEXTBLOB_AVAILABLE:
+        return 0.0, "neutral"
+    
+    try:
+        blob = TextBlob(text)
+        score = blob.sentiment.polarity
+        
+        if score > 0.1:
+            label = "positive"
+        elif score < -0.1:
+            label = "negative"
+        else:
+            label = "neutral"
+        
+        return score, label
+    except:
+        return 0.0, "neutral"
 
 @app.get("/seats")
 def get_seats():
@@ -142,7 +81,6 @@ def get_seats():
     seats = cur.fetchall()
     
     available = sum(1 for s in seats if s['status'] == 'available')
-    booked = len(seats) - available
     
     cur.close()
     conn.close()
@@ -150,7 +88,7 @@ def get_seats():
     return {
         "total_seats": len(seats),
         "available": available,
-        "booked": booked,
+        "booked": len(seats) - available,
         "seats": seats
     }
 
@@ -167,6 +105,7 @@ def book_seat(seat_id: int, booking: BookingRequest):
         row = cur.fetchone()
         
         if not row:
+            conn.rollback()
             raise HTTPException(status_code=404, detail="Seat not found")
         
         if row[0] != 'available':
@@ -176,15 +115,7 @@ def book_seat(seat_id: int, booking: BookingRequest):
                 "message": "Seat already booked"
             }
         
-        blob = TextBlob(booking.review)
-        score = blob.sentiment.polarity
-        
-        if score > 0.1:
-            label = "positive"
-        elif score < -0.1:
-            label = "negative"
-        else:
-            label = "neutral"
+        score, label = analyze_sentiment(booking.review)
         
         cur.execute("""
             UPDATE seats 
@@ -206,7 +137,7 @@ def book_seat(seat_id: int, booking: BookingRequest):
         
         return {
             "status": "success",
-            "message": "Seat booked successfully!",
+            "message": "Seat booked successfully",
             "seat_number": seat_number,
             "user_id": booking.user_id,
             "review": booking.review,
@@ -231,18 +162,11 @@ def get_analytics():
     
     cur.execute("""
         SELECT 
-            COUNT(*) FILTER (WHERE sentiment_label = 'positive') as positive_reviews,
-            COUNT(*) FILTER (WHERE sentiment_label = 'negative') as negative_reviews,
-            COUNT(*) FILTER (WHERE sentiment_label = 'neutral') as neutral_reviews,
-            AVG(sentiment_score) as average_score
-        FROM seats
-        WHERE user_review IS NOT NULL;
-    """)
-    
-    stats = cur.fetchone()
-    
-    cur.execute("""
-        SELECT seat_number, user_id, user_review, sentiment_score, sentiment_label
+            seat_number, 
+            user_id, 
+            user_review, 
+            sentiment_score, 
+            sentiment_label
         FROM seats
         WHERE user_review IS NOT NULL
         ORDER BY id;
@@ -250,10 +174,17 @@ def get_analytics():
     
     reviews = cur.fetchall()
     
+    positive = sum(1 for r in reviews if r['sentiment_label'] == 'positive')
+    negative = sum(1 for r in reviews if r['sentiment_label'] == 'negative')
+    neutral = sum(1 for r in reviews if r['sentiment_label'] == 'neutral')
+    
     cur.close()
     conn.close()
     
     return {
-        "statistics": stats,
-        "all_reviews": reviews
+        "total_reviews": len(reviews),
+        "positive": positive,
+        "negative": negative,
+        "neutral": neutral,
+        "reviews": reviews
     }
