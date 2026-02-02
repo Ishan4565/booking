@@ -81,11 +81,23 @@ def book_seat(seat_id: int, user_id: int, review: str):
 def reset_db():
     conn = psycopg2.connect(DATABASE_URL)
     cur = conn.cursor()
+    # This line forces the database to delete the old structure
     cur.execute("DROP TABLE IF EXISTS seats CASCADE;")
+    # This part builds the NEW structure with AI columns
+    cur.execute("""
+        CREATE TABLE seats (
+            id SERIAL PRIMARY KEY,
+            seat_number VARCHAR(10) UNIQUE NOT NULL,
+            status VARCHAR(20) DEFAULT 'available',
+            user_id INTEGER,
+            user_review TEXT,
+            sentiment_score FLOAT
+        );
+    """)
+    
     seats = [(f'A{i}',) for i in range(1, 11)]
     cur.executemany("INSERT INTO seats (seat_number) VALUES (%s);", seats)
     conn.commit()
     cur.close()
     conn.close()
-    return {"message": "Database reset."}
-
+    return {"message": "Database REBUILT with AI columns. Try booking now!"}
