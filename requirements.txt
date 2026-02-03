@@ -3,6 +3,7 @@ uvicorn
 psycopg2-binary
 textblob
 pydantic
-nltk
+
+
 
 
