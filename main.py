@@ -515,6 +515,71 @@ def get_seat_review(seat_id: int):
         "seat_id": seat_id,
         "reviews": reviews
     }
+@app.get("/diagnostics")
+def get_business_diagnostics():
+    """Finds specific operational failures based on NLP scores"""
+    conn = psycopg2.connect(DATABASE_URL)
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    
+    # 1. Identify which category has the lowest average score
+    cur.execute("""
+        SELECT 
+            AVG(sound_quality_score) as sound,
+            AVG(seat_comfort_score) as comfort,
+            AVG(seat_height_score) as height,
+            AVG(view_quality_score) as view,
+            AVG(booking_service_score) as service,
+            AVG(staff_behavior_score) as staff,
+            AVG(cleanliness_score) as cleanliness,
+            AVG(value_for_money_score) as value
+        FROM reviews;
+    """)
+    avg_scores = cur.fetchone()
+    
+    # Find the minimum score among the categories
+    lowest_category = min(avg_scores, key=avg_scores.get) if avg_scores['sound'] is not None else "None"
+    
+    # 2. Find the specific seat with the worst sound quality (Real-world maintenance check)
+    cur.execute("""
+        SELECT s.seat_number, r.sound_quality_review, r.sound_quality_score
+        FROM reviews r
+        JOIN seats s ON r.seat_id = s.id
+        WHERE r.sound_quality_score < -0.3
+        ORDER BY r.sound_quality_score ASC
+        LIMIT 3;
+    """)
+    sound_issues = cur.fetchall()
+
+    cur.close()
+    conn.close()
+
+    return {
+        "primary_operational_weakness": lowest_category,
+        "lowest_score": round(avg_scores[lowest_category], 3) if lowest_category != "None" else 0,
+        "maintenance_required": {
+            "sound_system_alerts": sound_issues,
+            "suggestion": f"Your customers are most unhappy with {lowest_category}. Focus resources here."
+        }
+    }
+
+@app.get("/wordcloud-data")
+def get_top_keywords():
+    """Extracts frequent words from reviews for visualization"""
+    conn = psycopg2.connect(DATABASE_URL)
+    cur = conn.cursor()
+    cur.execute("SELECT overall_experience FROM reviews;")
+    all_reviews = cur.fetchall()
+    cur.close()
+    conn.close()
+    
+    # Simple word frequency logic
+    text = " ".join([r[0] for r in all_reviews if r[0]]).lower()
+    words = [w for w in text.split() if len(w) > 3] # Ignore short words like 'is', 'the'
+    
+    from collections import Counter
+    top_words = Counter(words).most_common(10)
+    
+    return {"top_trending_keywords": dict(top_words)}
 
 @app.get("/analytics")
 def get_analytics():
@@ -574,3 +639,4 @@ def get_analytics():
             "value_for_money": round(stats['avg_value_score'] or 0, 3)
         }
     }
+
