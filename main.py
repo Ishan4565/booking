@@ -2,7 +2,7 @@ import streamlit as st
 import requests
 
 API_URL = "https://booking-dzz2.onrender.com"
-
+app = FastAPI()
 st.set_page_config(page_title="Elite Booking Experience", page_icon="🎭", layout="centered")
 
 st.markdown("""
@@ -132,3 +132,4 @@ if st.session_state.get("booking_step"):
                                  f"{analysis['value_for_money']['score']}")
                     else:
                         st.error("Booking failed. Please try again.")
+
