@@ -1,3 +1,15 @@
+from fastapi.middleware.cors import CORSMiddleware
+
+app = FastAPI(...) # This is your existing line
+
+# --- ADD THIS BLOCK ---
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Allows all websites to talk to your API
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+# ----------------------
 import os
 import psycopg2
 from fastapi import FastAPI, HTTPException
@@ -639,4 +651,5 @@ def get_analytics():
             "value_for_money": round(stats['avg_value_score'] or 0, 3)
         }
     }
+
 
