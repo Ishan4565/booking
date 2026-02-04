@@ -1,7 +1,2 @@
-fastapi
-uvicorn
-psycopg2-binary
-textblob
-nltk
 requests
 streamlit
