@@ -1,19 +1,8 @@
-from fastapi.middleware.cors import CORSMiddleware
-
-app = FastAPI(...) # This is your existing line
-
-# --- ADD THIS BLOCK ---
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # Allows all websites to talk to your API
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-# ----------------------
 import os
 import psycopg2
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
+from fastapi.middleware.cors import CORSMiddleware
 from psycopg2.extras import RealDictCursor
 from contextlib import asynccontextmanager
 from pydantic import BaseModel, Field
@@ -114,6 +103,13 @@ app = FastAPI(
     description="Seat booking with comprehensive multi-aspect review analysis",
     version="2.0.0",
     lifespan=lifespan
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 class BookingRequest(BaseModel):
@@ -527,13 +523,12 @@ def get_seat_review(seat_id: int):
         "seat_id": seat_id,
         "reviews": reviews
     }
+
 @app.get("/diagnostics")
 def get_business_diagnostics():
-    """Finds specific operational failures based on NLP scores"""
     conn = psycopg2.connect(DATABASE_URL)
     cur = conn.cursor(cursor_factory=RealDictCursor)
     
-    # 1. Identify which category has the lowest average score
     cur.execute("""
         SELECT 
             AVG(sound_quality_score) as sound,
@@ -548,10 +543,8 @@ def get_business_diagnostics():
     """)
     avg_scores = cur.fetchone()
     
-    # Find the minimum score among the categories
     lowest_category = min(avg_scores, key=avg_scores.get) if avg_scores['sound'] is not None else "None"
     
-    # 2. Find the specific seat with the worst sound quality (Real-world maintenance check)
     cur.execute("""
         SELECT s.seat_number, r.sound_quality_review, r.sound_quality_score
         FROM reviews r
@@ -576,7 +569,6 @@ def get_business_diagnostics():
 
 @app.get("/wordcloud-data")
 def get_top_keywords():
-    """Extracts frequent words from reviews for visualization"""
     conn = psycopg2.connect(DATABASE_URL)
     cur = conn.cursor()
     cur.execute("SELECT overall_experience FROM reviews;")
@@ -584,9 +576,8 @@ def get_top_keywords():
     cur.close()
     conn.close()
     
-    # Simple word frequency logic
     text = " ".join([r[0] for r in all_reviews if r[0]]).lower()
-    words = [w for w in text.split() if len(w) > 3] # Ignore short words like 'is', 'the'
+    words = [w for w in text.split() if len(w) > 3]
     
     from collections import Counter
     top_words = Counter(words).most_common(10)
@@ -651,5 +642,3 @@ def get_analytics():
             "value_for_money": round(stats['avg_value_score'] or 0, 3)
         }
     }
-
-
